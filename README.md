@@ -19,10 +19,10 @@ The codebase includes:
 
 Exported versions are available for download as:
 
-```text
-[models/mashtots-best-0.97.pt2](https://github.com/arkarapetyan/mashtots/releases/download/v1.0.0/mashtots-best-0.97.pt2)
-[models/mashtots-best-0.97.onnx](https://github.com/arkarapetyan/mashtots/releases/download/v1.0.0/mashtots-best-0.97.onnx)
-```
+
+[mashtots-best-0.97.pt2](https://github.com/arkarapetyan/mashtots/releases/download/v1.0.0/mashtots-best-0.97.pt2)
+[mashtots-best-0.97.onnx](https://github.com/arkarapetyan/mashtots/releases/download/v1.0.0/mashtots-best-0.97.onnx)
+
 
 ## Project Structure
 
