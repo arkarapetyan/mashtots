@@ -109,7 +109,7 @@ def train(config: TrainConfig, save_model: bool = True) -> float:
     )
     trainer.fit(model, datamodule=mashtots)
 
-    best_model_score = 0.97
+    best_model_score = checkpoint_callback.best_model_score
     if best_model_score is None:
         best_model_score = trainer.callback_metrics["val_acc"]
     best_val_acc = float(best_model_score.item())
@@ -117,9 +117,7 @@ def train(config: TrainConfig, save_model: bool = True) -> float:
     if not save_model:
         return best_val_acc
 
-    best_model_path = (
-        "model_checkpoints/mashtots-epoch=93-val_loss=0.86-val_acc=0.97.ckpt"
-    )
+    best_model_path = checkpoint_callback.best_model_path
     best_model = model.__class__.load_from_checkpoint(
         best_model_path,
         model_name=config.model.model_name,

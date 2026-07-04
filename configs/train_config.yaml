@@ -40,7 +40,7 @@ logger:
   tracking_uri: http://localhost:5000
 
 trainer:
-  max_epochs: 1
+  max_epochs: 100
   precision: '32'
 
 export:
