@@ -21,6 +21,7 @@ Exported versions are available for download as:
 
 
 [mashtots-best-0.97.pt2](https://github.com/arkarapetyan/mashtots/releases/download/v1.0.0/mashtots-best-0.97.pt2)
+
 [mashtots-best-0.97.onnx](https://github.com/arkarapetyan/mashtots/releases/download/v1.0.0/mashtots-best-0.97.onnx)
 
 
