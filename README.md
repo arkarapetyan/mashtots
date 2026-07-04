@@ -163,7 +163,7 @@ models/mashtots-efficientnet-best-0.97.onnx
 ### Metrics
 
 | Model | Epoch | Validation Loss | Validation Accuracy | Test Accuracy (Kaggle Public) | Export Format | 
-| --- | ---: | ---: | ---: | ---: | --- | --- |
+| --- | ---: | ---: | ---: | ---: | --- |
 | EfficientNet | 93 | 0.86 | 0.967 | 0.968  | Torch Export / ONNX | 
 
 
