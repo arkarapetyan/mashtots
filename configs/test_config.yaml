@@ -1,0 +1,17 @@
+defaults:
+  - _self_
+
+seed: 42
+
+data:
+  data_dir: ${hydra:runtime.cwd}/data
+  batch_size: 128
+  num_workers: 8
+  pin_memory: True
+
+model:
+  model_path: ${hydra:runtime.cwd}/models/mashtots-efficientnet-best-0.97.onnx
+
+output:
+  output_dir: ${hydra:runtime.cwd}/results
+  filename: predictions_new_rev.csv   

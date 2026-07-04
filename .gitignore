@@ -1,0 +1,29 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment File
+.env
+
+# Dataset
+data/*
+
+# Models
+model_checkpoints/
+models/
+
+# Results
+results/
+
+# Hydra and MLFlow
+mlartifacts/
+outputs/
+mlruns/
+mlflow.db

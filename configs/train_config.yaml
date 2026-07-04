@@ -1,0 +1,49 @@
+defaults:
+  - _self_
+
+seed: 42
+
+model:
+  model_name: "resnet"
+  in_channels: 1
+  num_classes: 78
+  dropout_rate: 0.4
+  optimizer_lr: 0.01
+  optimizer_weight_decay: 5e-4
+
+data:
+  data_dir: ${hydra:runtime.cwd}/data
+  batch_size: 128
+  num_workers: 8
+  val_ratio: 0.1
+  pin_memory: True
+
+callback:
+  checkpoints_dir: ${hydra:runtime.cwd}/model_checkpoints
+  early_stop_patience: 100
+  class_names: [
+    # Uppercase
+    "Ա", "Բ", "Գ", "Դ", "Ե", "Զ", "Է", "Ը", "Թ", "Ժ",
+    "Ի", "Լ", "Խ", "Ծ", "Կ", "Հ", "Ձ", "Ղ", "Ճ", "Մ",
+    "Յ", "Ն", "Շ", "Ո", "Չ", "Պ", "Ջ", "Ռ", "Ս", "Վ",
+    "Տ", "Ր", "Ց", "Ու", "Փ", "Ք", "Եվ", "Օ", "Ֆ",
+
+    # Lowercase
+    "ա", "բ", "գ", "դ", "ե", "զ", "է", "ը", "թ", "ժ",
+    "ի", "լ", "խ", "ծ", "կ", "հ", "ձ", "ղ", "ճ", "մ",
+    "յ", "ն", "շ", "ո", "չ", "պ", "ջ", "ռ", "ս", "վ",
+    "տ", "ր", "ց", "ու", "փ", "ք", "և", "օ", "ֆ",
+  ]
+
+logger:
+  experiment_name: mashtots-sanity-check
+  tracking_uri: http://localhost:5000
+
+trainer:
+  max_epochs: 1
+  precision: '32'
+
+export:
+  model_dir: ${hydra:runtime.cwd}/models
+  export_format: "torch"
+  filename: null
