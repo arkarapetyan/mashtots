@@ -10,8 +10,8 @@ data:
   pin_memory: True
 
 model:
-  model_path: ${hydra:runtime.cwd}/models/mashtots-efficientnet-best-0.97.onnx
+  model_path: ${hydra:runtime.cwd}/models/mashtots-efficientnet-best-0.97.pt2
 
 output:
   output_dir: ${hydra:runtime.cwd}/results
-  filename: predictions_new_rev.csv   
+  filename: predictions_new_rev1.csv   

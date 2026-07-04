@@ -131,7 +131,7 @@ def train(config: TrainConfig, save_model: bool = True) -> float:
         model=best_model,
         example_input=example_input,
         save_dir=config.export.model_dir,
-        filename=f"mashtots-efficientnet-best-{best_val_acc:.2f}"
+        filename=f"mashtots-best-{best_val_acc:.2f}"
         if not config.export.filename
         else config.export.filename,
     )

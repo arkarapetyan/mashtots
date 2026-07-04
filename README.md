@@ -10,6 +10,20 @@ The codebase includes:
 - Export support for Torch Export (`.pt2`) and ONNX (`.onnx`) models.
 - Prediction code that writes Kaggle-style submission CSV files.
 
+## Best Result
+
+| Model | Epoch | Validation Loss | Validation Accuracy | Test Accuracy (Kaggle Public) | Export Format | 
+| --- | ---: | ---: | ---: | ---: | --- |
+| ResNet | 93 | 0.86 | 0.967 | 0.968  | Torch Export / ONNX | 
+
+
+Exported versions are available for download as:
+
+```text
+[models/mashtots-best-0.97.pt2](https://github.com/arkarapetyan/mashtots/releases/download/v1.0.0/mashtots-best-0.97.pt2)
+[models/mashtots-best-0.97.onnx](https://github.com/arkarapetyan/mashtots/releases/download/v1.0.0/mashtots-best-0.97.onnx)
+```
+
 ## Project Structure
 
 ```text
@@ -138,7 +152,7 @@ Example override:
 
 ```bash
 uv run python predict.py --config-name test_config \
-  model.model_path=models/mashtots-efficientnet-best-0.97.onnx \
+  model.model_path=models/mashtots-best-0.97.onnx \
   output.filename=predictions.csv
 ```
 
@@ -150,22 +164,6 @@ Id,Category
 2,45
 3,7
 ```
-
-## Best Result
-
-Exported versions are available for download as:
-
-```text
-models/mashtots-efficientnet-best-0.97.pt2
-models/mashtots-efficientnet-best-0.97.onnx
-```
-
-### Metrics
-
-| Model | Epoch | Validation Loss | Validation Accuracy | Test Accuracy (Kaggle Public) | Export Format | 
-| --- | ---: | ---: | ---: | ---: | --- |
-| EfficientNet | 93 | 0.86 | 0.967 | 0.968  | Torch Export / ONNX | 
-
 
 ## Models
 
