@@ -1,5 +1,10 @@
+"""Lightning callbacks for training diagnostics."""
+
 from typing import List, Optional
 
+import matplotlib
+
+matplotlib.use("Agg")  # render figures without a display (training servers)
 import matplotlib.pyplot as plt
 import numpy as np
 import lightning as L
@@ -14,7 +19,9 @@ class ConfusionMatrixCallback(L.Callback):
     Accumulates predictions/targets across validation batches with a
     `torchmetrics.MulticlassConfusionMatrix` (safe under multi-GPU/DDP),
     then renders a heatmap sized to stay legible for large class counts
-    and logs it to MLflow.
+    and logs it to MLflow together with a text file listing the most
+    frequently confused class pairs. Nothing is logged when no MLflow logger
+    is attached.
 
     Args:
         num_classes: Total number of classes.
@@ -28,6 +35,10 @@ class ConfusionMatrixCallback(L.Callback):
             predicted class indices or raw logits.
         target_key: Key in the `validation_step` output dict holding
             ground-truth class indices.
+        annotate_max_classes: Write the value in each cell only when there
+            are at most this many classes; past that the numbers are
+            unreadable and slow to draw.
+        top_pairs: Number of most-confused (true, predicted) pairs to list.
 
     Example:
         In the LightningModule::
@@ -55,6 +66,8 @@ class ConfusionMatrixCallback(L.Callback):
         normalize: Optional[str] = "true",
         preds_key: str = "preds",
         target_key: str = "target",
+        annotate_max_classes: int = 30,
+        top_pairs: int = 20,
     ):
         super().__init__()
         if class_names is not None and len(class_names) != num_classes:
@@ -71,9 +84,10 @@ class ConfusionMatrixCallback(L.Callback):
         self.normalize = normalize
         self.preds_key = preds_key
         self.target_key = target_key
-        self.confmat = MulticlassConfusionMatrix(
-            num_classes=num_classes, normalize=normalize
-        )
+        self.annotate_max_classes = annotate_max_classes
+        self.top_pairs = top_pairs
+        # Raw counts; normalized on demand so both views come from one matrix.
+        self.confmat = MulticlassConfusionMatrix(num_classes=num_classes)
 
     def _should_log(self, trainer: L.Trainer) -> bool:
         """Checks whether the current epoch is a logging epoch."""
@@ -106,11 +120,59 @@ class ConfusionMatrixCallback(L.Callback):
         if not self._should_log(trainer):
             return
 
-        cm = self.confmat.compute().numpy()
-        fig = self._plot(cm, trainer.current_epoch)
-        self._log_figure(trainer, fig)
-        plt.close(fig)
+        counts = self.confmat.compute().numpy().astype(np.float64)
         self.confmat.reset()
+
+        logger = self._mlflow_logger(trainer)
+        if logger is None or trainer.sanity_checking:
+            return
+
+        fig = self._plot(self._normalize(counts), trainer.current_epoch)
+        logger.experiment.log_figure(
+            run_id=logger.run_id,
+            figure=fig,
+            artifact_file=f"confusion_matrix/epoch_{trainer.current_epoch}.png",
+        )
+        plt.close(fig)
+        logger.experiment.log_text(
+            run_id=logger.run_id,
+            text=self._top_pairs_report(counts),
+            artifact_file=f"confusion_matrix/top_pairs_epoch_{trainer.current_epoch}.txt",
+        )
+
+    def _normalize(self, counts: np.ndarray) -> np.ndarray:
+        """Applies the configured normalization to a matrix of raw counts."""
+        if self.normalize in (None, "none"):
+            return counts
+        if self.normalize == "true":
+            return counts / np.clip(counts.sum(axis=1, keepdims=True), 1, None)
+        if self.normalize == "pred":
+            return counts / np.clip(counts.sum(axis=0, keepdims=True), 1, None)
+        return counts / max(counts.sum(), 1)
+
+    def _top_pairs_report(self, counts: np.ndarray) -> str:
+        """Lists the most frequent (true, predicted) mistakes as a table."""
+        off_diagonal = counts.copy()
+        np.fill_diagonal(off_diagonal, 0)
+        row_totals = np.clip(counts.sum(axis=1), 1, None)
+        total_errors = max(off_diagonal.sum(), 1)
+
+        order = np.argsort(off_diagonal, axis=None)[::-1][: self.top_pairs]
+        lines = [
+            f"Total validation errors: {int(off_diagonal.sum())}",
+            "true -> predicted | count | % of true class | % of all errors",
+        ]
+        for flat_idx in order:
+            true_idx, pred_idx = np.unravel_index(flat_idx, counts.shape)
+            n = off_diagonal[true_idx, pred_idx]
+            if n == 0:
+                break
+            lines.append(
+                f"{self.class_names[true_idx]} ({true_idx}) -> "
+                f"{self.class_names[pred_idx]} ({pred_idx}) | {int(n)} | "
+                f"{100 * n / row_totals[true_idx]:.1f}% | {100 * n / total_errors:.1f}%"
+            )
+        return "\n".join(lines)
 
     def _plot(self, cm: np.ndarray, epoch: int) -> plt.Figure:
         """Builds a heatmap sized and styled to stay legible with many classes."""
@@ -136,7 +198,7 @@ class ConfusionMatrixCallback(L.Callback):
             vmax=vmax,
             xticklabels=self.class_names,
             yticklabels=self.class_names,
-            annot=n <= 100,  # per-cell numbers get unreadable past ~30 classes
+            annot=n <= self.annotate_max_classes,
             fmt=".2f" if is_normalized else ".0f",
             linewidths=0.1,
             linecolor="lightgray",
@@ -152,16 +214,10 @@ class ConfusionMatrixCallback(L.Callback):
         fig.tight_layout()
         return fig
 
-    def _log_figure(self, trainer: L.Trainer, fig: plt.Figure) -> None:
-        """Logs the confusion matrix to MLflow."""
-
+    @staticmethod
+    def _mlflow_logger(trainer: L.Trainer) -> Optional[MLFlowLogger]:
+        """Returns the trainer's MLflow logger, if any."""
         for logger in trainer.loggers:
             if isinstance(logger, MLFlowLogger):
-                logger.experiment.log_figure(
-                    run_id=logger.run_id,
-                    figure=fig,
-                    artifact_file=f"confusion_matrix/epoch_{trainer.current_epoch}.png",
-                )
-                return
-
-        raise RuntimeError("No MLFlowLogger attached to the trainer.")
+                return logger
+        return None

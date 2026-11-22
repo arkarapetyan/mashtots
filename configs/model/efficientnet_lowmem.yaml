@@ -1,0 +1,19 @@
+# @package _global_
+# EfficientNet recipe for GPUs with less memory.
+#
+# This EfficientNet keeps its early layers at the full 64x64 resolution and its
+# deep layers at 16x16, so at batch size 128 it stores ~7 GB of activations for
+# the backward pass (about 5x ResNet), even though it has fewer parameters.
+# Here each batch of 128 is processed as 2 x 64 with gradients accumulated in
+# between: same effective batch size and learning-rate schedule as the
+# `efficientnet` recipe, about half the activation memory (~3.6 GB).
+#
+# Still too large? Add: data.batch_size=32 trainer.accumulate_grad_batches=4
+defaults:
+  - efficientnet
+  - _self_
+
+data:
+  batch_size: 64
+trainer:
+  accumulate_grad_batches: 2

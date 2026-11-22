@@ -1,0 +1,13 @@
+# @package _global_
+# ResNet-18 embedding with an ArcFace head.
+# SGD with Nesterov momentum and a OneCycle schedule. Peak LR 0.1 with weight
+# decay 5e-4 at batch size 128 is the standard recipe for ResNet-style CNNs
+# trained from scratch on small images (CIFAR-scale datasets).
+model:
+  model_name: "resnet+arcface"
+  dropout_rate: 0.4
+  optimizer_lr: 0.1             # the ArcFace paper also trains with SGD from 0.1
+  optimizer_weight_decay: 5e-4
+  model_kwargs:
+    arcface_s: 18.0             # logit scale; ~16-20 suits a few dozen classes
+    arcface_m: 0.25             # angular margin (radians); 0.2-0.35 for few classes

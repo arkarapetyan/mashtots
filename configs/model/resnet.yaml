@@ -1,0 +1,11 @@
+# @package _global_
+# ResNet-18-style CNN adapted for 64x64 grayscale images.
+# SGD with Nesterov momentum and a OneCycle schedule. Peak LR 0.1 with weight
+# decay 5e-4 at batch size 128 is the standard recipe for ResNet-style CNNs
+# trained from scratch on small images (CIFAR-scale datasets).
+model:
+  model_name: resnet
+  dropout_rate: 0.4
+  optimizer_lr: 0.1
+  optimizer_weight_decay: 5e-4
+  model_kwargs: {}

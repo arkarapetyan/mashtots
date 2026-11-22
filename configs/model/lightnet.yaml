@@ -1,0 +1,11 @@
+# @package _global_
+# Small residual CNN.
+# SGD with Nesterov momentum and a OneCycle schedule. Peak LR 0.1 with weight
+# decay 5e-4 at batch size 128 is the standard recipe for ResNet-style CNNs
+# trained from scratch on small images (CIFAR-scale datasets).
+model:
+  model_name: lightnet
+  dropout_rate: 0.3
+  optimizer_lr: 0.1
+  optimizer_weight_decay: 5e-4
+  model_kwargs: {}

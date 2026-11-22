@@ -19,8 +19,9 @@ data/*
 model_checkpoints/
 models/
 
-# Results
+# Results and logs
 results/
+logs/
 
 # Hydra and MLFlow
 mlartifacts/

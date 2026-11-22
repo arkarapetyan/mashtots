@@ -1,13 +1,23 @@
-"""Dataset and Lightning data module for Mashtots character recognition."""
+"""Datasets for Mashtots character recognition."""
 
-import torch
+import numpy as np
 import pandas as pd
+import torch
 
 
-from typing import Optional, Any, Callable
+from typing import Optional, Any, Sequence
 from pathlib import Path
 from torch.utils.data import Dataset
 from torchvision.io import read_image
+
+IMAGE_SIZE = 64
+"""Height and width of every Mashtots image."""
+
+LABEL_COLUMNS = ("label", "Label", "category", "Category", "target")
+"""Column names recognized as class labels in the CSV split."""
+
+ID_COLUMNS = ("id", "Id", "ID")
+"""Column names recognized as sample ids in the CSV split."""
 
 
 class MashtotsDataset(Dataset):
@@ -18,12 +28,20 @@ class MashtotsDataset(Dataset):
     dataset. Image values are scaled to the ``[0, 1]`` range before transforms
     are applied.
 
+    The CSV is read by column name: an id column (one of ``ID_COLUMNS``) and a
+    label column (one of ``LABEL_COLUMNS``) are used when present, and every
+    remaining column must be one of the ``64 x 64`` pixels. Unlabeled samples
+    get the label ``-1``.
+
     Args:
         data_dir: Root directory containing the extracted Mashtots dataset.
         train: If ``True``, load images from ``Train/Train``. If ``False``,
             load flattened image rows from ``new_test/new_test.csv``.
-        transform: Optional transform pipeline applied to each sample. When no
-            transform is provided, a normalization-only transform is used.
+        transform: Optional transform pipeline applied to each sample.
+
+    Attributes:
+        ids: Sample ids from the CSV id column, or ``None`` when absent.
+        has_labels: Whether real labels are available.
     """
 
     def __init__(
@@ -42,23 +60,18 @@ class MashtotsDataset(Dataset):
         """
 
         super(MashtotsDataset, self).__init__()
-        self.data_dir = data_dir
+        self.data_dir = Path(data_dir)
         self.train = train
-
         self.transform = transform
+        self.ids: Optional[list] = None
+        self.has_labels = True
 
         if self.train:
-            self.load_data: Callable[..., tuple[list[Path], list[torch.Tensor]]] = (
-                self._load_train_data
-            )
-            self.get_item_input: Callable[[int], torch.Tensor] = self._get_train_item
+            self.inputs, self.labels = self._load_train_data()
         else:
-            self.load_data = self._load_test_data
-            self.get_item_input = self._get_test_item
+            self.inputs, self.labels = self._load_test_data()
 
-        self.inputs, self.labels = self.load_data()
-
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
         """Return one transformed sample and its label.
 
         Args:
@@ -71,24 +84,31 @@ class MashtotsDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
 
-        x = self.get_item_input(idx)
-        y = self.labels[idx]
-
+        x = self.load_image(idx)
         if self.transform:
             x = self.transform(x)
-
-        return x, y
+        return x, self.labels[idx]
 
     def __len__(self) -> int:
-        """Return the number of samples in the dataset.
-
-        Returns:
-            Number of available labels, matching the number of samples.
-        """
+        """Return the number of samples in the dataset."""
 
         return len(self.labels)
 
-    def _load_train_data(self) -> tuple[list[Path], list[torch.Tensor]]:
+    def load_image(self, idx: int) -> torch.Tensor:
+        """Return the untransformed image for ``idx`` scaled to ``[0, 1]``.
+
+        Args:
+            idx: Index of the sample.
+
+        Returns:
+            Image tensor with shape ``(1, 64, 64)``.
+        """
+
+        if self.train:
+            return read_image(str(self.inputs[idx])).float().div_(255)
+        return self.inputs[idx]
+
+    def _load_train_data(self) -> tuple[list[Path], list[int]]:
         """Load training image paths and class labels.
 
         Training data is expected under ``data_dir/Train/Train`` with one
@@ -96,67 +116,93 @@ class MashtotsDataset(Dataset):
         integer label.
 
         Returns:
-            A tuple of image paths and labels.
+            A tuple of image paths and integer labels.
         """
 
         train_dir = self.data_dir / "Train" / "Train"
 
-        inputs = []
-        labels = []
-        for cls_dir in sorted(train_dir.iterdir()):
-            cls_inputs = sorted(cls_dir.iterdir())
-            cls_labels = torch.LongTensor([int(cls_dir.name)] * len(cls_inputs))
+        inputs: list[Path] = []
+        labels: list[int] = []
+        for cls_dir in sorted(p for p in train_dir.iterdir() if p.is_dir()):
+            cls_inputs = sorted(p for p in cls_dir.iterdir() if p.is_file())
             inputs.extend(cls_inputs)
-            labels.extend(cls_labels)
+            labels.extend([int(cls_dir.name)] * len(cls_inputs))
 
         return inputs, labels
 
-    def _load_test_data(self) -> tuple[torch.Tensor, list[torch.Tensor]]:
+    def _load_test_data(self) -> tuple[torch.Tensor, list[int]]:
         """Load test or prediction samples from the dataset CSV.
 
-        The CSV is expected to contain flattened ``64 x 64`` grayscale images.
-        If the final column can be interpreted as labels, it is returned as the
-        target tensor. Otherwise, zero labels are created for unlabeled
-        prediction data.
-
         Returns:
-            A tuple containing image tensors with shape ``(N, 1, 64, 64)`` and
-            labels.
+            Image tensors with shape ``(N, 1, 64, 64)`` and labels (``-1``
+            when the CSV has no label column).
+
+        Raises:
+            ValueError: If the pixel columns do not form ``64 x 64`` images.
         """
 
-        test_path = self.data_dir / "new_test" / "new_test.csv"
-        raw_data = torch.Tensor(pd.read_csv(test_path).to_numpy())
+        csv_path = self.data_dir / "new_test" / "new_test.csv"
+        frame = pd.read_csv(csv_path)
 
-        try:
-            inputs = raw_data[:, :-1].reshape(-1, 1, 64, 64).div_(255)
-            labels = torch.LongTensor(raw_data[:, -1].flatten())
-        except RuntimeError:
-            inputs = raw_data.reshape(-1, 1, 64, 64).div_(255)
-            labels = torch.zeros(len(inputs))
+        id_column = next((c for c in ID_COLUMNS if c in frame.columns), None)
+        label_column = next((c for c in LABEL_COLUMNS if c in frame.columns), None)
+
+        if id_column is not None:
+            self.ids = frame[id_column].tolist()
+        if label_column is not None:
+            labels = frame[label_column].astype(int).tolist()
+        else:
+            labels = [-1] * len(frame)
+            self.has_labels = False
+
+        pixels = frame.drop(columns=[c for c in (id_column, label_column) if c])
+        if pixels.shape[1] != IMAGE_SIZE * IMAGE_SIZE:
+            raise ValueError(
+                f"{csv_path} has {pixels.shape[1]} pixel columns after removing "
+                f"id/label columns; expected {IMAGE_SIZE * IMAGE_SIZE}. Recognized "
+                f"id columns: {ID_COLUMNS}, label columns: {LABEL_COLUMNS}."
+            )
+
+        inputs = torch.from_numpy(pixels.to_numpy(dtype=np.float32))
+        inputs = inputs.reshape(-1, 1, IMAGE_SIZE, IMAGE_SIZE).div_(255)
         return inputs, labels
 
-    def _get_train_item(self, idx: int) -> torch.Tensor:
-        """Read and scale a training image.
 
-        Args:
-            idx: Index of the image path in ``self.inputs``.
+class TransformedSubset(Dataset):
+    """A subset of a dataset with its own transform.
 
-        Returns:
-            Image tensor scaled to the ``[0, 1]`` range.
-        """
+    Lets the train, validation and test splits share one underlying
+    :class:`MashtotsDataset` (and one directory scan) while applying
+    different transforms.
 
-        img_path = self.inputs[idx]
-        img = read_image(img_path).float().div_(255)
-        return img
+    Args:
+        dataset: Underlying dataset; its own transform is ignored.
+        indices: Indices of the samples in the subset.
+        transform: Transform applied to each image, or ``None``.
+    """
 
-    def _get_test_item(self, idx: int) -> torch.Tensor:
-        """Return a preloaded test or prediction image tensor.
+    def __init__(
+        self,
+        dataset: MashtotsDataset,
+        indices: Sequence[int],
+        transform: Optional[Any] = None,
+    ):
+        """Initialize the subset. See the class docstring for the arguments."""
 
-        Args:
-            idx: Index of the tensor in ``self.inputs``.
+        self.dataset = dataset
+        self.indices = list(indices)
+        self.transform = transform
 
-        Returns:
-            Image tensor for the requested index.
-        """
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, int]:
+        """Return one transformed sample and its label."""
 
-        return self.inputs[idx]
+        source_idx = self.indices[idx]
+        x = self.dataset.load_image(source_idx)
+        if self.transform:
+            x = self.transform(x)
+        return x, self.dataset.labels[source_idx]
+
+    def __len__(self) -> int:
+        """Return the number of samples in the subset."""
+
+        return len(self.indices)

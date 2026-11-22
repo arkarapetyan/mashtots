@@ -1,26 +1,57 @@
+# Training configuration.
+#
+# The model recipe is picked from configs/model/<name>.yaml:
+#   uv run python train.py model=vit
+# Shared defaults are set below. A recipe can override any of them (e.g. the
+# ViT recipe trains longer and turns on weight averaging), and the command
+# line overrides both, e.g. trainer.max_epochs=150.
+
 defaults:
   - _self_
+  - model: resnet
 
 seed: 42
 
 model:
-  model_name: "resnet"
   in_channels: 1
   num_classes: 78
-  dropout_rate: 0.4
-  optimizer_lr: 0.01
-  optimizer_weight_decay: 5e-4
 
 data:
   data_dir: ${hydra:runtime.cwd}/data
   batch_size: 128
   num_workers: 8
   val_ratio: 0.1
+  test_ratio: 0.0        # > 0 holds out a labeled test split, evaluated after training
   pin_memory: True
+  augmentation:
+    degrees: 10
+    translate: [0.1, 0.1]
+    scale: [0.95, 1.05]  # narrow: letter size helps separate some upper/lowercase pairs
+    shear: 10            # covers writer slant
+    elastic_alpha: 40.0  # smooth stroke warp of about 2-3 px
+    elastic_sigma: 5.0
+    elastic_p: 0.5
+    noise_std: 0.02
+
+loss:
+  label_smoothing: 0.1
+  case_pair_offset: 39   # label of a letter's other case = (label + 39) % 78
+  pair_weight: 0.5       # pairwise term separating each letter from its rivals; 0 = plain CE
+  case_prior: 1.0        # weight of the other-case twin among a letter's rivals
+  adaptive: true         # learn class weights and rivals from the training confusion matrix
+  class_weight_strength: 1.0
+  max_class_weight: 3.0  # cap relative to an error-free letter
+  top_k: 3
+  momentum: 0.7
+  adapt_start_epoch: 5   # skip the warmup epochs, whose confusions are mostly noise
 
 callback:
   checkpoints_dir: ${hydra:runtime.cwd}/model_checkpoints
-  early_stop_patience: 100
+  early_stop_patience: 100  # >= max_epochs, so effectively off: accuracy peaks as the LR anneals at the end of the schedule
+  confusion_matrix_every_n_epochs: 5
+  weight_averaging:
+    enabled: false       # EMA of the weights; the ViT recipe turns it on
+    decay: 0.9995
   class_names: [
     # Uppercase
     "Ա", "Բ", "Գ", "Դ", "Ե", "Զ", "Է", "Ը", "Թ", "Ժ",
@@ -38,10 +69,13 @@ callback:
 logger:
   experiment_name: mashtots-sanity-check
   tracking_uri: http://localhost:5000
+  run_name: null         # defaults to the model name
 
 trainer:
   max_epochs: 100
-  precision: '32'
+  precision: auto        # bf16-mixed on Ampere+ GPUs, 16-mixed on older GPUs, 32 on CPU
+  deterministic: true    # reproducible; set false for extra speed
+  accumulate_grad_batches: 1  # >1 splits each batch into smaller pieces to save GPU memory
 
 export:
   model_dir: ${hydra:runtime.cwd}/models

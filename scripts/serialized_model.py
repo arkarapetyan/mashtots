@@ -6,7 +6,9 @@ import os
 import torch
 import onnxruntime as ort
 
+from abc import ABC, abstractmethod
 from torch.export import Dim
+from torch.export.passes import move_to_device_pass
 from lightning import LightningModule
 from typing import Type, Callable
 from pathlib import Path
@@ -26,6 +28,7 @@ def register_format(
     Args:
         name: Format name used in configuration, such as ``"torch"`` or
             ``"onnx"``.
+        extensions: File extensions handled by the backend.
 
     Returns:
         Decorator that registers and returns the backend class.
@@ -64,7 +67,7 @@ def get_export_format(name: str) -> Type[BaseSerializedModel]:
     """
 
     if name not in _SERIALIZATION_FORMATS:
-        raise ValueError(f"Invalid Model Name: {name}")
+        raise ValueError(f"Invalid Export Format: {name}")
     return _SERIALIZATION_FORMATS[name]
 
 
@@ -106,7 +109,7 @@ def list_available_extensions() -> frozenset[str]:
     return frozenset(_FILE_EXTENSIONS.keys())
 
 
-class BaseSerializedModel:
+class BaseSerializedModel(ABC):
     """Base interface for serialized model backends.
 
     Args:
@@ -128,7 +131,10 @@ class BaseSerializedModel:
 
         if not model_path.exists():
             raise FileNotFoundError(f"File Not Found: {model_path!r}")
+        self.model_path = model_path
 
+    @staticmethod
+    @abstractmethod
     def export_model(
         model: LightningModule,
         example_input: torch.Tensor,
@@ -149,8 +155,7 @@ class BaseSerializedModel:
             Path to the exported model file.
         """
 
-        pass
-
+    @abstractmethod
     def predict(self, input_data: torch.Tensor) -> torch.Tensor:
         """Run inference with a serialized model backend.
 
@@ -160,8 +165,6 @@ class BaseSerializedModel:
         Returns:
             Model logits for the input batch.
         """
-
-        pass
 
 
 @register_format("torch", [".pt", ".pt2"])
@@ -177,10 +180,28 @@ class TorchSerializedModel(BaseSerializedModel):
 
         super(TorchSerializedModel, self).__init__(model_path)
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        exported_program = torch.export.load(model_path)
+        try:
+            exported_program = torch.export.load(model_path)
+        except RuntimeError as exc:
+            if not torch.cuda.is_available():
+                raise RuntimeError(
+                    f"Could not load {model_path.name} on this machine, which has no "
+                    "GPU. The usual cause is a file exported with its weights on a "
+                    "GPU (older train.py versions did this); such files only load on "
+                    "an NVIDIA GPU. Re-export it from its checkpoint: train.py now "
+                    "exports on CPU, which loads everywhere."
+                ) from exc
+            raise
+        # Files are exported on CPU; move weights and any device constants in the
+        # graph to the GPU when one is available.
+        try:
+            exported_program = move_to_device_pass(exported_program, self._device)
+        except Exception:
+            pass  # fall back to moving the module's parameters below
         self._model = exported_program.module()
         self._model.to(self._device)
 
+    @staticmethod
     def export_model(
         model: LightningModule,
         example_input: torch.Tensor,
@@ -201,8 +222,7 @@ class TorchSerializedModel(BaseSerializedModel):
             Path to the exported ``.pt2`` file.
         """
 
-        if not save_dir.exists():
-            save_dir.mkdir()
+        save_dir.mkdir(parents=True, exist_ok=True)
         save_path = save_dir / f"{filename}.pt2"
         model.eval()
         example_input = example_input.to(model.device)
@@ -235,7 +255,11 @@ class TorchSerializedModel(BaseSerializedModel):
 
 @register_format("onnx", [".onnx"])
 class OnnxSerializedModel(BaseSerializedModel):
-    """ONNX Runtime backend for loading ``.onnx`` models and inference."""
+    """ONNX Runtime backend for loading ``.onnx`` models and inference.
+
+    Uses the CUDA execution provider when the installed ONNX Runtime build has
+    it (``onnxruntime-gpu``), otherwise the CPU provider.
+    """
 
     def __init__(self, model_path: Path):
         """Create an ONNX Runtime inference session.
@@ -248,12 +272,17 @@ class OnnxSerializedModel(BaseSerializedModel):
         opts = ort.SessionOptions()
         opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         opts.intra_op_num_threads = os.cpu_count()
+        available = ort.get_available_providers()
+        providers = [
+            p for p in ("CUDAExecutionProvider", "CPUExecutionProvider") if p in available
+        ]
         self._ort_session = ort.InferenceSession(
             model_path,
             sess_options=opts,
-            providers=["CPUExecutionProvider"],
+            providers=providers,
         )
 
+    @staticmethod
     def export_model(
         model: LightningModule,
         example_input: torch.Tensor,
@@ -274,8 +303,7 @@ class OnnxSerializedModel(BaseSerializedModel):
             Path to the exported ONNX file.
         """
 
-        if not save_dir.exists():
-            save_dir.mkdir()
+        save_dir.mkdir(parents=True, exist_ok=True)
         save_path = save_dir / f"{filename}.onnx"
         model.eval()
         example_input = example_input.to(model.device)
@@ -297,12 +325,13 @@ class OnnxSerializedModel(BaseSerializedModel):
         """Run inference with ONNX Runtime.
 
         Args:
-            input_data: Input image batch on CPU.
+            input_data: Input image batch.
 
         Returns:
-            Model logits converted to a PyTorch tensor.
+            Model logits as a CPU PyTorch tensor.
         """
 
-        ort_inputs = {self._ort_session.get_inputs()[0].name: input_data.numpy()}
+        input_name = self._ort_session.get_inputs()[0].name
+        ort_inputs = {input_name: input_data.detach().cpu().numpy()}
         ort_outputs = self._ort_session.run(None, ort_inputs)
-        return torch.Tensor(ort_outputs)[0]
+        return torch.from_numpy(ort_outputs[0])

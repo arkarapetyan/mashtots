@@ -1,3 +1,11 @@
+# Prediction configuration.
+#
+# One model:
+#   uv run python predict.py 'model.model_paths=[models/mashtots-resnet.pt2]'
+# Ensemble (class probabilities are averaged, optionally weighted):
+#   uv run python predict.py \
+#     'model.model_paths=[models/mashtots-resnet.pt2,models/mashtots-vit.pt2]'
+
 defaults:
   - _self_
 
@@ -10,8 +18,12 @@ data:
   pin_memory: True
 
 model:
-  model_path: ${hydra:runtime.cwd}/models/mashtots-efficientnet-best-0.97.pt2
+  model_paths:
+    - ${hydra:runtime.cwd}/models/mashtots-resnet.pt2
+  weights: null      # e.g. [1.0, 1.0, 0.5]; null = equal weights
+  tta: false         # also average over +-tta_shift_px pixel shifts
+  tta_shift_px: 2
 
 output:
   output_dir: ${hydra:runtime.cwd}/results
-  filename: predictions_new_rev1.csv   
+  filename: predictions.csv

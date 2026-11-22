@@ -1,7 +1,9 @@
 """Pydantic models for validating prediction configuration."""
 
 from pathlib import Path
-from pydantic import BaseModel, Field, field_validator
+from typing import Optional
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .serialized_model import list_available_extensions
 
@@ -10,33 +12,66 @@ class ModelConfig(BaseModel):
     """Serialized model settings used for prediction.
 
     Attributes:
-        export_format: Registered serialization format name.
-        model_path: Path to the exported model file.
+        model_paths: One or more exported model files (``.pt2`` or
+            ``.onnx``). Several paths form an ensemble whose class
+            probabilities are averaged.
+        weights: Optional weight per model for the probability average.
+            Defaults to equal weights.
+        tta: Whether to average each model over small image shifts.
+        tta_shift_px: Shift distance in pixels used by TTA.
     """
 
-    model_path: Path
+    model_paths: list[Path] = Field(min_length=1)
+    weights: Optional[list[float]] = None
+    tta: bool = False
+    tta_shift_px: int = Field(default=2, ge=1, le=8)
 
-    @field_validator("model_path")
+    @field_validator("model_paths")
     @classmethod
-    def validate_model_path(cls, v: Path) -> Path:
-        """Validate that the serialized model path exists.
+    def validate_model_paths(cls, paths: list[Path]) -> list[Path]:
+        """Validate that every serialized model exists and has a known format.
 
         Args:
-            v: Model path from the configuration.
+            paths: Model paths from the configuration.
 
         Returns:
-            The validated model path.
+            The validated paths, made absolute.
 
         Raises:
-            FileNotFoundError: If the path does not exist.
-            ValueError: If the File Extension is not registered.
+            FileNotFoundError: If a path does not exist.
+            ValueError: If a file extension is not registered.
         """
 
-        if not v.exists():
-            raise FileNotFoundError(f"File Does Not Exist: {v!r}")
-        if v.suffix not in list_available_extensions():
-            raise ValueError(f"Invalid File Extension: {v.suffix}")
-        return v
+        resolved = []
+        for path in paths:
+            path = path.expanduser().resolve()
+            if not path.exists():
+                raise FileNotFoundError(f"File Does Not Exist: {path!r}")
+            if path.suffix not in list_available_extensions():
+                raise ValueError(f"Invalid File Extension: {path.suffix}")
+            resolved.append(path)
+        return resolved
+
+    @model_validator(mode="after")
+    def validate_weights(self) -> "ModelConfig":
+        """Check that weights, when given, match the models and are usable.
+
+        Returns:
+            The validated configuration.
+
+        Raises:
+            ValueError: If the weights are invalid.
+        """
+
+        if self.weights is not None:
+            if len(self.weights) != len(self.model_paths):
+                raise ValueError(
+                    f"Got {len(self.weights)} weights for "
+                    f"{len(self.model_paths)} models"
+                )
+            if min(self.weights) < 0 or sum(self.weights) <= 0:
+                raise ValueError("weights must be non-negative and not all zero")
+        return self
 
 
 class DataConfig(BaseModel):
